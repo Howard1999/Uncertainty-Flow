@@ -1,0 +1,19 @@
+{
+    "name": "model name",
+
+    "dataset":{
+        "x": "path to the condition",
+        "y": "path to the generate output"
+    },
+    "hyper-parameters":{
+        "lr": 5e-2,
+        "batch": 32,
+        "epoch": 100
+    },
+    "model-structure":{
+        "input-dim": 512,
+        "flow-modules": "512-512-512",
+        "condition-size": 17,
+        "num-block": 1
+    }
+}
