@@ -86,7 +86,7 @@ if __name__ == "__main__":
         prior.load_state_dict(torch.load(args.load, map_location=args.gpu))
     # load data
     if configs['dataset'] == 'wiggle':
-        x, y = load_wiggle
+        x, y = load_wiggle()
     else:
         x = np.load(configs['dataset']['x'])
         y = np.load(configs['dataset']['y'])
