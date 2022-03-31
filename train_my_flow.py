@@ -114,11 +114,11 @@ if __name__ == "__main__":
     for epoch in tqdm(range(configs['hyper-parameters']['epoch'])):
         for condition, generated_output in train_loader:
             # compute from y to z, and probabilty delta
-            approx21, delta_log_p2 = prior(generated_output.squeeze(1), condition, torch.zeros(configs['hyper-parameters']['batch'], generated_output.shape[2], 1).to(generated_output))
+            approx21, delta_log_p2 = prior(generated_output, condition, torch.zeros(generated_output.shape[0], generated_output.shape[1], 1).to(generated_output))
             # compute z log probabilty
-            approx2 = standard_normal_logprob(approx21).view(configs['hyper-parameters']['batch'], -1).sum(1, keepdim=True)
+            approx2 = standard_normal_logprob(approx21).view(generated_output.shape[0], -1).sum(1, keepdim=True)
             # compute y log probabilty
-            delta_log_p2 = delta_log_p2.view(configs['hyper-parameters']['batch'], generated_output.shape[2], 1).sum(1)
+            delta_log_p2 = delta_log_p2.view(generated_output.shape[0], generated_output.shape[1], 1).sum(1)
             log_p2 = (approx2 - delta_log_p2)
             # loss = - loglikelihood
             loss = -log_p2.mean()

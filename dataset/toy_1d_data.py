@@ -26,4 +26,4 @@ def load_wiggle():
     X = ((x - x_means) / x_stds).astype(np.float32)
     Y = ((y - y_means) / y_stds).astype(np.float32)
 
-    return X, Y
+    return X[:, None, :], Y[:, None, :]
