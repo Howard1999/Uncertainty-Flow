@@ -15,6 +15,7 @@ import numpy as np
 from torch.utils import data
 from torch import optim
 
+from dataset.toy_1d_data import load_wiggle
 from module.flow import cnf
 
 
@@ -84,8 +85,11 @@ if __name__ == "__main__":
     if args.load is not None:
         prior.load_state_dict(torch.load(args.load, map_location=args.gpu))
     # load data
-    x = np.load(configs['dataset']['x'])
-    y = np.load(configs['dataset']['y'])
+    if configs['dataset'] == 'wiggle':
+        x, y = load_wiggle
+    else:
+        x = np.load(configs['dataset']['x'])
+        y = np.load(configs['dataset']['y'])
     # create dataset and dataloader
     my_dataset = MyDataset(condition=torch.Tensor(x).cuda(args.gpu), generated_output=torch.tensor(y).float().cuda(args.gpu))
     train_loader = data.DataLoader(my_dataset, shuffle=True, batch_size=configs['hyper-parameters']['batch'])
