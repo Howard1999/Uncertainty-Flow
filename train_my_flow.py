@@ -1,6 +1,5 @@
 #! /usr/bin/python3.7
 
-from distutils.command.config import config
 import json
 import argparse
 import os
@@ -86,7 +85,7 @@ if __name__ == "__main__":
         prior.load_state_dict(torch.load(args.load, map_location=args.gpu))
     # load data
     if configs['dataset'] == 'wiggle':
-        x, y = load_wiggle()
+        x, y = load_wiggle(position_encoding=True)
     else:
         x = np.load(configs['dataset']['x'])
         y = np.load(configs['dataset']['y'])
