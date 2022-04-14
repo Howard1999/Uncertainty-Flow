@@ -14,7 +14,7 @@ import numpy as np
 from torch.utils import data
 from torch import optim
 
-from dataset.toy_1d_data import load_wiggle
+from dataset.toy_1d_data import *
 from module.flow import cnf
 
 
@@ -86,6 +86,12 @@ if __name__ == "__main__":
     # load data
     if configs['dataset'] == 'wiggle':
         x, y = load_wiggle(position_encoding=True)
+    elif configs['dataset'] == 'matern':
+        x, y = load_matern_1d(position_encoding=True)
+    elif configs['dataset'] == 'agw':
+        x, y = load_agw_1d(position_encoding=True)
+    elif configs['dataset'] == 'dun':
+        x, y, _, _ = load_dun_1d(position_encoding=True)
     else:
         x = np.load(configs['dataset']['x'])
         y = np.load(configs['dataset']['y'])
