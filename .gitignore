@@ -1,3 +1,7 @@
 wandb/
 project/
 __pycache__
+dataset/agw_data
+dataset/dun_1d_data
+dataset/matern_data
+dataset/__MACOSX

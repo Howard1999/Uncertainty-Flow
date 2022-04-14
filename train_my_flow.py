@@ -14,6 +14,7 @@ import numpy as np
 from torch.utils import data
 from torch import optim
 
+from dataset.utils import position_encode
 from dataset.toy_1d_data import *
 from module.flow import cnf
 
@@ -95,6 +96,10 @@ if __name__ == "__main__":
     else:
         x = np.load(configs['dataset']['x'])
         y = np.load(configs['dataset']['y'])
+
+    x_min, x_max, x_var = np.min(x), np.max(x), np.var(x)
+    y_min, y_max, y_var = np.min(y), np.max(y), np.var(y)
+
     # create dataset and dataloader
     my_dataset = MyDataset(condition=torch.Tensor(x).cuda(args.gpu), generated_output=torch.tensor(y).float().cuda(args.gpu))
     train_loader = data.DataLoader(my_dataset, shuffle=True, batch_size=configs['hyper-parameters']['batch'])
@@ -114,33 +119,52 @@ if __name__ == "__main__":
             name=os.path.join(configs["name"], timestamp),
             group=args.group)
 
+
+    def fit(prior, condition, generated_output):
+        # compute from y to z, and probabilty delta
+        approx21, delta_log_p2 = prior(generated_output, condition, torch.zeros(generated_output.shape[0], generated_output.shape[1], 1).to(generated_output))
+        # compute z log probabilty
+        approx2 = standard_normal_logprob(approx21).view(generated_output.shape[0], -1).sum(1, keepdim=True)
+        # compute y log probabilty
+        delta_log_p2 = delta_log_p2.view(generated_output.shape[0], generated_output.shape[1], 1).sum(1)
+        log_p2 = (approx2 - delta_log_p2)
+        # loss = - loglikelihood
+        loss = -log_p2.mean()
+        # update model
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        return loss.item()
+
+
     ''' Training Loop '''
     ite = 0
     for epoch in tqdm(range(configs['hyper-parameters']['epoch'])):
         for condition, generated_output in train_loader:
-            # compute from y to z, and probabilty delta
-            approx21, delta_log_p2 = prior(generated_output, condition, torch.zeros(generated_output.shape[0], generated_output.shape[1], 1).to(generated_output))
-            # compute z log probabilty
-            approx2 = standard_normal_logprob(approx21).view(generated_output.shape[0], -1).sum(1, keepdim=True)
-            # compute y log probabilty
-            delta_log_p2 = delta_log_p2.view(generated_output.shape[0], generated_output.shape[1], 1).sum(1)
-            log_p2 = (approx2 - delta_log_p2)
-            # loss = - loglikelihood
-            loss = -log_p2.mean()
-            # update model
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            loss = fit(prior, condition, generated_output)
             # record
             if args.wandb == True:
                 wandb.log({
                     'epoch': epoch,
                     'iteration': ite,
 
-                    'loss': loss.item()
+                    'loss': loss
                 })
-
             ite += 1
+
+            # train uniform noise
+            if "train-noise-per" in configs["hyper-parameters"]:
+                if ite%configs["hyper-parameters"]["train-noise-per"] == 0:
+                    # random sample uniform data
+                    x_u = np.random.uniform(x_min - x_var, x_max + x_var, (configs["hyper-parameters"]["batch"], 1))
+                    y_u = np.random.uniform(y_min - y_var, y_max + y_var, (configs["hyper-parameters"]["batch"], 1))
+                    x_u = position_encode(x_u)[:, None, :]
+                    y_u = y_u[:, None, :]
+                    # fit
+                    condition = torch.tensor(x_u).float().cuda(args.gpu)
+                    generated_output = torch.tensor(y_u).float().cuda(args.gpu)
+                    fit(prior, condition, generated_output)
 
         # save model
         if args.save is not None and (epoch+1) % args.save_per == 0:

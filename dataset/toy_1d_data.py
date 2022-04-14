@@ -84,7 +84,7 @@ def load_matern_1d(base_dir='./dataset', position_encoding=False, m=3):
         np.save(base_dir + '/matern_data/matern_1d.npy', xy)
 
         if position_encoding:
-            X = position_encode(X, m)
+            x = position_encode(x, m)
 
         return x[:, None, :], y[:, None, :]
     else:

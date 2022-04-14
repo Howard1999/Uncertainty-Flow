@@ -1,5 +1,6 @@
 #! /usr/bin/python3.7
 
+from matplotlib.image import imread
 import torch
 from torch.utils import data
 
@@ -12,7 +13,7 @@ from math import log, pi
 from tqdm import tqdm
 
 from module.flow import cnf
-from dataset.toy_1d_data import load_wiggle
+from dataset.toy_1d_data import *
 
 
 class MyDataset(data.Dataset):
@@ -40,6 +41,7 @@ def visualize_uncertainty(savePath, gt_x, gt_y, xdata, mean, var):
     dyfit = 2 * np.sqrt(var)
     plt.plot(gt_x, gt_y, 'ok', ms=1)
     plt.plot(xdata, mean, '-', color='g')
+    plt.plot(xdata, var, '-', color='r')
     plt.fill_between(xdata, mean - dyfit, mean + dyfit, color='g', alpha=0.2)
     plt.savefig(savePath)
 
@@ -57,9 +59,15 @@ def main(configs, device, model_path):
                 configs['model-structure']['num-block']).cuda(device)
     prior.load_state_dict(torch.load(model_path))
     prior.eval()
-    # load dataset
+    # load data
     if configs['dataset'] == 'wiggle':
         x, y = load_wiggle()
+    elif configs['dataset'] == 'matern':
+        x, y = load_matern_1d()
+    elif configs['dataset'] == 'agw':
+        x, y = load_agw_1d()
+    elif configs['dataset'] == 'dun':
+        x, y, _, _ = load_dun_1d()
     else:
         x = np.load(configs['dataset']['x'])
         y = np.load(configs['dataset']['y'])
@@ -79,7 +87,7 @@ def main(configs, device, model_path):
     for i, x in tqdm(enumerate(evalset)):
         input_x = torch.from_numpy(np.random.normal(loc=0, scale=1, size=(100, 1, 1))).float().to(device)
 
-        position_encode = False
+        position_encode = True
         m = 3
         # position encode
         if position_encode:
