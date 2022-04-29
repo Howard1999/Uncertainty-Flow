@@ -13,7 +13,10 @@ from math import log, pi
 from tqdm import tqdm
 
 from module.flow import cnf
-from dataset.toy_1d_data import *
+from dun_datasets.utils import position_encode
+from dun_datasets.additional_gap_loader import *
+from my_datasets.toy_1d_data import *
+from condition_sampler.flow_sampler import FlowSampler
 
 
 class MyDataset(data.Dataset):
@@ -37,11 +40,12 @@ class MyDataset(data.Dataset):
         return len(self.generated_output)
 
 
-def visualize_uncertainty(savePath, gt_x, gt_y, xdata, mean, var):
-    dyfit = 2 * np.sqrt(var)
+def visualize_uncertainty(savePath, gt_x, gt_y, xdata, mean, var, weight):
+    dyfit = np.sqrt(var)
     plt.plot(gt_x, gt_y, 'ok', ms=1)
     plt.plot(xdata, mean, '-', color='g')
-    plt.plot(xdata, var, '-', color='r')
+    plt.plot(xdata, dyfit, '-', color='r')
+    plt.plot(xdata, weight, '-', color='b')
     plt.fill_between(xdata, mean - dyfit, mean + dyfit, color='g', alpha=0.2)
     plt.savefig(savePath)
 
@@ -61,16 +65,34 @@ def main(configs, device, model_path):
     prior.eval()
     # load data
     if configs['dataset'] == 'wiggle':
-        x, y = load_wiggle()
+        x, y = load_wiggle_1d()
+        x, y = x[:, None, :], y[:, None, :]
     elif configs['dataset'] == 'matern':
         x, y = load_matern_1d()
+        x, y = x[:, None, :], y[:, None, :]
     elif configs['dataset'] == 'agw':
         x, y = load_agw_1d()
+        x, y = x[:, None, :], y[:, None, :]
     elif configs['dataset'] == 'dun':
-        x, y, _, _ = load_dun_1d()
+        x, y, _, _ = load_my_1d()
+        x, y = x[:, None, :], y[:, None, :]
+    elif configs['dataset'] == 'ring':
+        x, y = load_ring_1d()
+        x, y = x[:, None, :], y[:, None, :]
     else:
         x = np.load(configs['dataset']['x'])
         y = np.load(configs['dataset']['y'])
+
+    # condition sampler
+    condition_sampler = FlowSampler(configs['sampler-setting']['input-shape'], 
+                                    configs['sampler-setting']['flow-modules'], 
+                                    configs['sampler-setting']['num-block'], gpu=args.gpu)
+
+    if configs['sampler-setting']['load'] is not None:
+        condition_sampler.load(configs['sampler-setting']['load'])
+    else:
+        print('WARNING: sampler is not specify, weight evaluate result might not work')
+        condition_sampler.fit(x, 32, 5e-3, 50)
 
     gt_X, gt_y = sortData(x, y)
 
@@ -83,37 +105,34 @@ def main(configs, device, model_path):
     mean_list = []
     var_list = []
     x_list = []
+    weight_list = []
 
-    for i, x in tqdm(enumerate(evalset)):
+    for _, x in tqdm(enumerate(evalset)):
         input_x = torch.from_numpy(np.random.normal(loc=0, scale=1, size=(100, 1, 1))).float().to(device)
 
-        position_encode = True
-        m = 3
-        # position encode
-        if position_encode:
-            condition_y = x[0].expand(100, 1, configs['model-structure']['input-dim'])
-            x_p_list = [condition_y]
-            for i in range(m):
-                x_p_list.append(torch.sin((2**(i+1)) * condition_y))
-                x_p_list.append(torch.cos((2**(i+1)) * condition_y))
-            condition_y = torch.cat(x_p_list, dim=2)
-        else:
-            condition_y = x[0].expand(100, 1, configs['model-structure']['input-dim'])
+        condition_y = x[0].expand(100, 1, configs['model-structure']['input-dim'])
+        logp = condition_sampler.logprob(condition_y)
+        weight = torch.pow(10, -torch.exp(logp))
         
-        delta_p = torch.zeros(100, 1, configs['model-structure']['input-dim']).to(x[0])
+        if configs['position_encoding']:
+            condition_y = condition_y.cpu()
+            condition_y = position_encode(condition_y, axis=2)
+            condition_y = torch.tensor(condition_y).to(device)
 
-        approx21, delta_log_p2 = prior(input_x, condition_y, delta_p, reverse=True)
+        approx21 = prior(input_x, condition_y, None, reverse=True)
 
         np_x = float(x[0].detach().cpu().numpy()[0])
         np_var = float(torch.var(approx21).detach().cpu().numpy())
         np_mean = float(torch.mean(approx21).detach().cpu().numpy())
+        np_weight = weight.mean().cpu().item()
 
         x_list.append(np_x)
         var_list.append(np_var)
         mean_list.append(np_mean)
+        weight_list.append(np_weight)
 
     savePath = "var.png"
-    visualize_uncertainty(savePath, gt_X.reshape(-1), gt_y.reshape(-1), x_list, mean_list, var_list)
+    visualize_uncertainty(savePath, gt_X.reshape(-1), gt_y.reshape(-1), x_list, mean_list, var_list, weight_list)
 
 if __name__ == '__main__':
     # args

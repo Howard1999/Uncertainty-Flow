@@ -1,19 +1,37 @@
 {
-    "name": "model name",
+    "name": "toy-model-v1.7",
 
-    "dataset":{
-        "x": "path to the condition",
-        "y": "path to the generate output"
-    },
+    "dataset": "dun",
+
     "hyper-parameters":{
-        "lr": 5e-2,
-        "batch": 32,
-        "epoch": 100
+        "lr": 1e-2,
+        "batch": 128,
+        "epoch": 50,
+        "train-noise": 10
     },
+
     "model-structure":{
-        "input-dim": 512,
-        "flow-modules": "512-512-512",
-        "condition-size": 17,
+        "input-dim": 1,
+        "flow-modules": "32-32-32-32-32",
+        "condition-size": 7,
         "num-block": 1
-    }
+    },
+
+    "sampler-setting":{
+        "input-shape": [1, 1],
+        "flow-modules": "128-128",
+        "num-block": 1,
+
+        "hyper-parameters":{
+            "epoch": 10,
+            "lr": 1e-2,
+            "batch": 32
+        },
+
+        "load": null
+    },
+
+    "position_encoding": true,
+
+    "note": "position encoding"
 }

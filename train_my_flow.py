@@ -14,9 +14,11 @@ import numpy as np
 from torch.utils import data
 from torch import optim
 
-from dataset.utils import position_encode
-from dataset.toy_1d_data import *
+from dun_datasets.utils import position_encode
+from dun_datasets.additional_gap_loader import *
+from my_datasets.toy_1d_data import *
 from module.flow import cnf
+from condition_sampler.flow_sampler import FlowSampler
 
 
 def standard_normal_logprob(z):
@@ -86,13 +88,20 @@ if __name__ == "__main__":
         prior.load_state_dict(torch.load(args.load, map_location=args.gpu))
     # load data
     if configs['dataset'] == 'wiggle':
-        x, y = load_wiggle(position_encoding=True)
+        x, y = load_wiggle_1d()
+        x, y = x[:, None, :], y[:, None, :]
     elif configs['dataset'] == 'matern':
-        x, y = load_matern_1d(position_encoding=True)
+        x, y = load_matern_1d()
+        x, y = x[:, None, :], y[:, None, :]
     elif configs['dataset'] == 'agw':
-        x, y = load_agw_1d(position_encoding=True)
+        x, y = load_agw_1d()
+        x, y = x[:, None, :], y[:, None, :]
     elif configs['dataset'] == 'dun':
-        x, y, _, _ = load_dun_1d(position_encoding=True)
+        x, y, _, _ = load_my_1d()
+        x, y = x[:, None, :], y[:, None, :]
+    elif configs['dataset'] == 'ring':
+        x, y = load_ring_1d()
+        x, y = x[:, None, :], y[:, None, :]
     else:
         x = np.load(configs['dataset']['x'])
         y = np.load(configs['dataset']['y'])
@@ -100,6 +109,21 @@ if __name__ == "__main__":
     x_min, x_max, x_var = np.min(x), np.max(x), np.var(x)
     y_min, y_max, y_var = np.min(y), np.max(y), np.var(y)
 
+    # condition sampler
+    condition_sampler = FlowSampler(configs['sampler-setting']['input-shape'], 
+                                    configs['sampler-setting']['flow-modules'], 
+                                    configs['sampler-setting']['num-block'], gpu=args.gpu)
+    if configs['sampler-setting']['load'] is not None:
+        condition_sampler.load(configs['sampler-setting']['load'])
+    else:
+        condition_sampler.fit(x,
+                              batch=configs['sampler-setting']['hyper-parameters']['batch'], 
+                              lr   =configs['sampler-setting']['hyper-parameters']['lr'],
+                              epoch=configs['sampler-setting']['hyper-parameters']['epoch'])
+
+    # position encode
+    if configs['position_encoding']:
+        x = position_encode(x, axis=2)
     # create dataset and dataloader
     my_dataset = MyDataset(condition=torch.Tensor(x).cuda(args.gpu), generated_output=torch.tensor(y).float().cuda(args.gpu))
     train_loader = data.DataLoader(my_dataset, shuffle=True, batch_size=configs['hyper-parameters']['batch'])
@@ -108,8 +132,12 @@ if __name__ == "__main__":
     # create save folder
     if args.save is not None:
         save_dir = os.path.join(args.save, configs['name'], timestamp)
+        sampler_path = os.path.abspath(os.path.join(save_dir, 'sampler.pt'))        
         os.makedirs(save_dir, 0o0755)
-        shutil.copyfile(args.cfg, os.path.join(save_dir, 'cfg.json'))
+        configs['sampler-setting']['load'] = sampler_path
+        with open(os.path.join(save_dir, 'cfg.json'), 'w') as fp:
+            json.dump(configs, fp)
+        condition_sampler.save(sampler_path)
     # wandb
     if args.wandb == True:
         wandb.init(
@@ -120,7 +148,7 @@ if __name__ == "__main__":
             group=args.group)
 
 
-    def fit(prior, condition, generated_output):
+    def fit(prior, condition, generated_output, weight):
         # compute from y to z, and probabilty delta
         approx21, delta_log_p2 = prior(generated_output, condition, torch.zeros(generated_output.shape[0], generated_output.shape[1], 1).to(generated_output))
         # compute z log probabilty
@@ -129,7 +157,7 @@ if __name__ == "__main__":
         delta_log_p2 = delta_log_p2.view(generated_output.shape[0], generated_output.shape[1], 1).sum(1)
         log_p2 = (approx2 - delta_log_p2)
         # loss = - loglikelihood
-        loss = -log_p2.mean()
+        loss = -(log_p2 * weight).mean()
         # update model
         optimizer.zero_grad()
         loss.backward()
@@ -142,7 +170,28 @@ if __name__ == "__main__":
     ite = 0
     for epoch in tqdm(range(configs['hyper-parameters']['epoch'])):
         for condition, generated_output in train_loader:
-            loss = fit(prior, condition, generated_output)
+            true_data_weight = torch.tensor([[1.]] * condition.size()[0]).cuda(args.gpu)
+
+            # genarete noise
+            x_u = np.random.uniform(x_min - x_var, x_max + x_var, (configs["hyper-parameters"]["train-noise"], 1))
+            y_u = np.random.uniform(y_min - y_var, y_max + y_var, (configs["hyper-parameters"]["train-noise"], 1))
+            # compute noise weight
+            noise_logp = condition_sampler.logprob(torch.tensor(x_u).float().cuda(args.gpu))
+            
+            # noise_weight = torch.clamp(1 - torch.exp(noise_logp), 0, 1)  # (1-p)
+            # noise_weight = 1 / (1 + torch.exp(noise_logp))               # 1 / (1+p)
+            noise_weight = torch.pow(10, -torch.exp(noise_logp))         # 10 ** -p
+
+            # add into batch
+            if configs['position_encoding']:
+                x_u = position_encode(x_u)[:, None, :]
+            y_u = y_u[:, None, :]
+            condition = torch.cat([condition, torch.tensor(x_u).float().cuda(args.gpu)])
+            generated_output = torch.cat([generated_output, torch.tensor(y_u).float().cuda(args.gpu)])
+
+            weight = torch.cat([true_data_weight, noise_weight])
+            # fit
+            loss = fit(prior, condition, generated_output, weight)
             # record
             if args.wandb == True:
                 wandb.log({
@@ -152,19 +201,6 @@ if __name__ == "__main__":
                     'loss': loss
                 })
             ite += 1
-
-            # train uniform noise
-            if "train-noise-per" in configs["hyper-parameters"]:
-                if ite%configs["hyper-parameters"]["train-noise-per"] == 0:
-                    # random sample uniform data
-                    x_u = np.random.uniform(x_min - x_var, x_max + x_var, (configs["hyper-parameters"]["batch"], 1))
-                    y_u = np.random.uniform(y_min - y_var, y_max + y_var, (configs["hyper-parameters"]["batch"], 1))
-                    x_u = position_encode(x_u)[:, None, :]
-                    y_u = y_u[:, None, :]
-                    # fit
-                    condition = torch.tensor(x_u).float().cuda(args.gpu)
-                    generated_output = torch.tensor(y_u).float().cuda(args.gpu)
-                    fit(prior, condition, generated_output)
 
         # save model
         if args.save is not None and (epoch+1) % args.save_per == 0:
