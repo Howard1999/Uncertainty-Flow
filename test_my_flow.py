@@ -79,6 +79,9 @@ def main(configs, device, model_path):
     elif configs['dataset'] == 'ring':
         x, y = load_ring_1d()
         x, y = x[:, None, :], y[:, None, :]
+    elif configs['dataset'] == 'compose':
+        x, y = load_compose_1d()
+        x, y = x[:, None, :], y[:, None, :]
     else:
         x = np.load(configs['dataset']['x'])
         y = np.load(configs['dataset']['y'])
