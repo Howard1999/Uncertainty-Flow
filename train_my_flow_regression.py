@@ -15,8 +15,7 @@ from torch.utils import data
 from torch import optim
 
 from dun_datasets.utils import position_encode
-from dun_datasets.additional_gap_loader import *
-from my_datasets.toy_1d_data import *
+from dun_datasets.UCI_gap_loader import *
 from module.flow import cnf
 from condition_sampler.flow_sampler import FlowSampler
 
@@ -87,28 +86,10 @@ if __name__ == "__main__":
     if args.load is not None:
         prior.load_state_dict(torch.load(args.load, map_location=torch.device('cuda:'+str(args.gpu))))
     # load data
-    if configs['dataset'] == 'wiggle':
-        x, y = load_wiggle_1d()
-        x, y = x[:, None, :], y[:, None, :]
-    elif configs['dataset'] == 'matern':
-        x, y = load_matern_1d()
-        x, y = x[:, None, :], y[:, None, :]
-    elif configs['dataset'] == 'agw':
-        x, y = load_agw_1d()
-        x, y = x[:, None, :], y[:, None, :]
-    elif configs['dataset'] == 'dun':
-        x, y, _, _ = load_my_1d()
-        x, y = x[:, None, :], y[:, None, :]
-    elif configs['dataset'] == 'ring':
-        x, y = load_ring_1d()
-        x, y = x[:, None, :], y[:, None, :]
-    elif configs['dataset'] == 'compose':
-        x, y = load_compose_1d()
-        x, y = x[:, None, :], y[:, None, :]
-    else:
-        x = np.load(configs['dataset']['x'])
-        y = np.load(configs['dataset']['y'])
+    x, _, _, _, y, _, _, _ = load_gap_UCI(configs['dataset'], gap=False)
+    x, y = x[:, None, :], y[:, None, :]
 
+    x_shape, y_shape = x.shape, y.shape
     x_min, x_max, x_var = np.min(x), np.max(x), np.var(x)
     y_min, y_max, y_var = np.min(y), np.max(y), np.var(y)
 
@@ -176,8 +157,8 @@ if __name__ == "__main__":
             true_data_weight = torch.tensor([[1.]] * condition.size()[0]).cuda(args.gpu)
 
             # genarete noise
-            x_u = np.random.uniform(x_min - x_var, x_max + x_var, (configs["hyper-parameters"]["train-noise"], 1))
-            y_u = np.random.uniform(y_min - y_var, y_max + y_var, (configs["hyper-parameters"]["train-noise"], 1))
+            x_u = np.random.uniform(x_min - x_var, x_max + x_var, (configs["hyper-parameters"]["train-noise"], 1, x_shape[2]))
+            y_u = np.random.uniform(y_min - y_var, y_max + y_var, (configs["hyper-parameters"]["train-noise"], 1, y_shape[2]))
             # compute noise weight
             noise_logp = condition_sampler.logprob(torch.tensor(x_u).float().cuda(args.gpu))
             
@@ -187,8 +168,7 @@ if __name__ == "__main__":
 
             # add into batch
             if configs['position_encoding']:
-                x_u = position_encode(x_u)[:, None, :]
-            y_u = y_u[:, None, :]
+                x_u = position_encode(x_u, axis=2)
             condition = torch.cat([condition, torch.tensor(x_u).float().cuda(args.gpu)])
             generated_output = torch.cat([generated_output, torch.tensor(y_u).float().cuda(args.gpu)])
 
